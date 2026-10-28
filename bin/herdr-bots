@@ -1,0 +1,494 @@
+#!/bin/bash
+# herdr-bots: every agent inside the running herdr servers, as JSON for the
+# little pets on screen.
+#
+#   list                              every agent in every running local
+#                                     session and on every saved SSH machine
+#   focus <session> <pane> [machine]  land on that agent's pane and bring the
+#                                     herdr window up, or for a saved machine
+#                                     the window attached to that machine
+#   demo on|off                       invented agents instead of yours
+#
+# The states are herdr's own. `blocked` means herdr recognised an approval or
+# a question on screen, so that agent is waiting on you. `done` is idle after
+# work you have not looked at yet; focusing the pane turns it back into plain
+# `idle`. `status_since_unix_ms` is when the agent entered its current state,
+# which is what lets a pet get sadder the longer it waits.
+#
+# Every value below the session name comes from a snapshot: workspace labels,
+# tab labels and terminal titles are whatever somebody typed or an agent
+# wrote. They leave here as JSON strings and are drawn as plain text, never
+# handed to a shell.
+
+set -euo pipefail
+
+# The terminal this may open starts herdr's server when none is running, and
+# every shell inside it inherits the umask, so that launch keeps the caller's.
+readonly INHERITED_UMASK=$(umask)
+umask 077
+
+readonly APP_ID=org.omarchy.herdr
+readonly CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-herdr-bots"
+readonly DEMO_FILE="$CACHE_DIR/demo"
+
+# What another process may hand this script before anything reads it. The
+# pets poll every few seconds from a shell that never restarts, so the other
+# side never gets to decide how much memory that costs.
+readonly SESSIONS_BYTE_CAP=$((2 * 1024 * 1024))
+readonly SNAPSHOT_BYTE_CAP=$((2 * 1024 * 1024))
+readonly WINDOWS_BYTE_CAP=$((4 * 1024 * 1024))
+readonly TOTAL_BYTE_CAP=$((8 * 1024 * 1024))
+readonly SESSION_COUNT_CAP=64
+readonly MACHINE_COUNT_CAP=16
+readonly AGENT_COUNT_CAP=200
+# A saved machine that does not answer in time is left out, and left alone
+# for a minute after that, so one VM that is off does not hold every pet up.
+readonly MACHINE_TIMEOUT=4
+readonly MACHINE_RETRY_SECONDS=60
+readonly DOWN_DIR="$CACHE_DIR/down"
+
+die() {
+  printf '{"ok":false,"error":%s,"agents":[]}\n' "$(printf '%s' "${1-}" | jq -Rs .)"
+  exit 0
+}
+
+# `head -c cap+1` in front of every read, so one byte past the cap is the
+# evidence that there was more to come.
+over_byte_cap() {
+  [ "$(printf '%s' "$1" | wc -c)" -gt "$2" ]
+}
+
+valid_session_name() {
+  [[ "${1-}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]
+}
+
+valid_machine_id() {
+  [[ "${1-}" =~ ^[A-Za-z0-9_-]{1,64}$ ]]
+}
+
+valid_machine_target() {
+  [[ "${1-}" =~ ^(ssh://)?([A-Za-z0-9._-]+@)?[A-Za-z0-9._-]+(:[0-9]{1,5})?$ ]]
+}
+
+valid_pane_id() {
+  [[ "${1-}" =~ ^[A-Za-z0-9_-]{1,32}:[A-Za-z0-9_-]{1,32}$ ]]
+}
+
+readable_file() {
+  [[ -f "$1" && ! -L "$1" ]]
+}
+
+private_dir() {
+  local dir="$1" owner
+  mkdir -p -m 700 -- "$dir" 2>/dev/null
+  [[ -d $dir && ! -L $dir ]] || return 1
+  owner="$(stat -c '%u' -- "$dir" 2>/dev/null)" || return 1
+  [[ $owner == "$(id -u)" ]] || return 1
+  chmod 700 -- "$dir" 2>/dev/null || return 1
+}
+
+require_tools() {
+  # The shell is not a login shell, and herdr is often installed somewhere
+  # only a login shell has on its PATH.
+  command -v herdr >/dev/null 2>&1 || \
+    PATH="$HOME/.local/bin:$HOME/bin:$HOME/.local/share/mise/installs/herdr/latest:$HOME/.cargo/bin:/usr/local/bin:$PATH"
+  local tool
+  for tool in herdr jq; do
+    command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed"
+  done
+}
+
+now_ms() {
+  date +%s%3N
+}
+
+# ------------------------------------------------------------------ demo
+
+demo_on() {
+  readable_file "$DEMO_FILE"
+}
+
+cmd_demo() {
+  case "${1-}" in
+    on)
+      private_dir "$CACHE_DIR" || die "could not use the cache directory"
+      : > "$DEMO_FILE"
+      printf '{"ok":true,"demo":true}\n'
+      ;;
+    off)
+      rm -f -- "$DEMO_FILE"
+      printf '{"ok":true,"demo":false}\n'
+      ;;
+    *) die "demo takes on or off" ;;
+  esac
+}
+
+# Every state a pet can be in, with the ages that change how it behaves: one
+# that has only just asked, one that has been waiting long enough to cry, one
+# that finished so long ago it got bored.
+demo_list() {
+  local now
+  now=$(now_ms)
+  jq -cn --argjson now "$now" '
+    def bot($pane; $kind; $status; $age; $name; $ws):
+      {session: "default", machine: "", pane: $pane, kind: $kind, status: $status,
+       since: ($now - $age * 1000), name: $name, title: $name, workspace: $ws};
+    {ok: true, error: "", demo: true, now: $now, agents: [
+      bot("w1:p1"; "claude";   "working"; 140;  "Receipt formatter";   "checkout-service"),
+      bot("w1:p2"; "codex";    "blocked"; 25;   "Drop legacy invoices"; "billing-api"),
+      bot("w2:p1"; "claude";   "done";    90;   "Search index";        "docs-site"),
+      bot("w2:p2"; "gemini";   "working"; 600;  "Palette tokens";      "design-tokens"),
+      bot("w3:p1"; "claude";   "blocked"; 420;  "Light baker";         "render-farm"),
+      bot("w3:p2"; "opencode"; "done";    1500; "Anchor links";        "docs-site"),
+      bot("w4:p1"; "claude";   "idle";    3000; "Release notes";       "changelog"),
+      bot("w4:p2"; "codex";    "idle";    5000; "Flaky test triage";   "ci"),
+      bot("w4:p3"; "claude";   "idle";    9000; "Onboarding copy";     "marketing-site")
+    ]}'
+}
+
+# --------------------------------------------------------------- listing
+
+# One server's snapshot. `--session` is left off for the default one: passing
+# it by name would address a named session that happens to be called
+# "default", which is a different server.
+snapshot_for() {
+  local name="$1" is_default="$2" out
+  if [[ $is_default == true ]]; then
+    out=$(herdr api snapshot 2>/dev/null | head -c "$((SNAPSHOT_BYTE_CAP + 1))") || true
+  else
+    out=$(herdr --session "$name" api snapshot 2>/dev/null | head -c "$((SNAPSHOT_BYTE_CAP + 1))") || true
+  fi
+  [[ -n $out ]] || return 1
+  over_byte_cap "$out" "$SNAPSHOT_BYTE_CAP" && return 1
+  printf '%s' "$out"
+}
+
+# What a pet is called. A tab somebody named is the name they gave the work,
+# so that wins. A tab nobody named says nothing: a number locally, the
+# agent's own name on a machine. Then an agent on a saved machine goes by the
+# machine's label, which is how herdr lists it; a local one by its terminal
+# title, and the workspace after that.
+#
+# Snapshots are keyed by session name, or by "@" and the machine id for a
+# saved SSH machine; its pane ids only mean something on that machine.
+readonly AGENTS_JQ='
+  . as $snapshots
+  | [ $snapshots | to_entries[]
+    | (.key | startswith("@")) as $remote
+    | (if $remote then .key[1:] else "" end) as $machine
+    | (if $remote then "default" else .key end) as $session
+    | (if $remote then ($machines[$machine] // "") else "" end | tostring | .[0:80]) as $machineLabel
+    | (.value.result.snapshot // {}) as $snap
+    | (($snap.workspaces // []) | map({key: (.workspace_id // ""), value: (.label // "")}) | from_entries) as $ws
+    | (($snap.tabs // []) | map({key: (.tab_id // ""), value: (.label // "")}) | from_entries) as $tabs
+    | ($snap.agents // [])[]
+    | ((.agent // "") | tostring | ascii_downcase | .[0:32]) as $kind
+    | ((.terminal_title_stripped // .terminal_title // "") | tostring | .[0:120]) as $title
+    | (($tabs[.tab_id // ""] // "") | tostring | .[0:80]) as $tab
+    | (($ws[.workspace_id // ""] // "") | tostring | .[0:80]) as $workspace
+    | (($tab | test("^[0-9]*$")) or ($tab | ascii_downcase) == $kind) as $plainTab
+    | { session: $session,
+        machine: $machine,
+        pane: (.pane_id // ""),
+        kind: $kind,
+        status: (.agent_status // "unknown"),
+        since: (.status_since_unix_ms // 0),
+        title: $title,
+        workspace: (if $remote and $title != "" then $title else $workspace end),
+        name: (if ($plainTab | not) then $tab
+               elif $machineLabel != "" then $machineLabel
+               elif $title != "" then $title
+               else $workspace end) }
+    | select(.pane != "")
+  ]
+  | .[0:$agentCap]
+  | {ok: true, error: "", now: $now, agents: .}
+'
+
+cmd_list() {
+  require_tools
+
+  local sessions_json
+  sessions_json=$(herdr session list --json 2>/dev/null | head -c "$((SESSIONS_BYTE_CAP + 1))") || true
+  [[ -n $sessions_json ]] || die "could not reach herdr"
+  over_byte_cap "$sessions_json" "$SESSIONS_BYTE_CAP" && die "session list too large to read safely"
+
+  # Assembled as text rather than folded together with a jq call per session:
+  # this runs every few seconds and a jq start costs more than the splice. The
+  # key is safe unquoted because valid_session_name refused anything but
+  # letters, digits, dot, dash and underscore.
+  local snapshots='' name is_default running snap seen=0
+  while IFS=$'\t' read -r name is_default running; do
+    [[ -n $name && $running == true ]] || continue
+    valid_session_name "$name" || continue
+    (( seen < SESSION_COUNT_CAP )) || break
+    (( ${#snapshots} <= TOTAL_BYTE_CAP )) || break
+    seen=$(( seen + 1 ))
+    snap=$(snapshot_for "$name" "$is_default") || continue
+    snapshots+="${snapshots:+,}\"$name\":$snap"
+  done < <(printf '%s' "$sessions_json" |
+    jq -r '.sessions[]? | "\(.name)\t\(.default // false)\t\(.running // false)"' 2>/dev/null)
+  # One truncated or unparseable reply must not take every pet with it.
+  printf '%s' "{$snapshots}" | jq -e . >/dev/null 2>&1 || snapshots=''
+
+  local machines='{}' remote
+  remote=$(machine_snapshots) && {
+    IFS= read -r machines
+    remote=$(cat)
+  } <<<"$remote"
+  [[ -n $remote ]] && snapshots+="${snapshots:+,}$remote"
+  snapshots="{$snapshots}"
+
+  # On stdin rather than as an argument: one argument is capped at 128 KB by
+  # the kernel, and a busy server's snapshot is bigger than that.
+  printf '%s' "$snapshots" | jq -c \
+    --argjson now "$(now_ms)" \
+    --argjson agentCap "$AGENT_COUNT_CAP" \
+    --argjson machines "$machines" \
+    "$AGENTS_JQ" 2>/dev/null || die "unexpected output from herdr"
+}
+
+# A herdr command on a saved machine, over herdr's own ssh. herdr opens an
+# ssh master for every such call, in /tmp/herdr-ssh-<its pid>-<n>, and
+# leaves it running for ten minutes after it is done: asked every few
+# seconds, that is hundreds of idle ssh processes and a directory for each
+# call. So herdr is started under a pid this knows, and as soon as it
+# returns its master is stopped and its directory removed. Prints what
+# herdr printed.
+on_machine() {
+  local id="$1" pidfile pid dir sock status=0
+  shift
+  private_dir "$CACHE_DIR" || return 1
+  pidfile=$(mktemp -p "$CACHE_DIR" pid.XXXXXX) || return 1
+  # shellcheck disable=SC2016
+  timeout "$MACHINE_TIMEOUT" bash -c 'printf "%s" "$$" > "$1"; shift; exec herdr "$@"' \
+    _ "$pidfile" --machine "$id" "$@" 2>/dev/null || status=$?
+  pid=$(cat -- "$pidfile" 2>/dev/null) || true
+  rm -f -- "$pidfile"
+  if [[ $pid =~ ^[0-9]+$ ]]; then
+    for dir in /tmp/herdr-ssh-"$pid"-*; do
+      [[ -d $dir && ! -L $dir && -O $dir ]] || continue
+      for sock in "$dir"/cm-*; do
+        [[ -S $sock ]] && ssh -F /dev/null -O exit -S "$sock" herdr >/dev/null 2>&1
+      done
+      rm -rf -- "$dir"
+    done
+  fi
+  return "$status"
+}
+
+# Where a saved machine is and which of its sessions herdr shows, as
+# "target<TAB>session", read back out of herdr's own list.
+machine_profile() {
+  valid_machine_id "${1-}" || return 1
+  local target session
+  IFS=$'\t' read -r target session < <(herdr machine list --json 2>/dev/null |
+    head -c "$((SESSIONS_BYTE_CAP + 1))" |
+    jq -r --arg id "$1" '.[]? | select(.id == $id) | "\(.target // "")\t\(.session // "default")"' 2>/dev/null) || return 1
+  valid_machine_target "$target" && valid_session_name "$session" || return 1
+  printf '%s\t%s\n' "$target" "$session"
+}
+
+# Every enabled saved SSH machine, asked at the same time. Prints the labels
+# by id as one JSON line, then the snapshots as "@id":snapshot entries ready
+# to splice into the local ones. Machine labels are free text and only ever
+# travel inside JSON built by jq.
+machine_snapshots() {
+  local list
+  list=$(herdr machine list --json 2>/dev/null | head -c "$((SESSIONS_BYTE_CAP + 1))") || true
+  [[ -n $list ]] || return 1
+  over_byte_cap "$list" "$SESSIONS_BYTE_CAP" && return 1
+
+  local -a ids=()
+  local id
+  while IFS= read -r id; do
+    valid_machine_id "$id" || continue
+    (( ${#ids[@]} < MACHINE_COUNT_CAP )) || break
+    ids+=("$id")
+  done < <(printf '%s' "$list" | jq -r '.[]? | select(.enabled == true) | .id // empty' 2>/dev/null)
+  (( ${#ids[@]} > 0 )) || return 1
+  private_dir "$CACHE_DIR" && private_dir "$DOWN_DIR" || return 1
+
+  local work
+  work=$(mktemp -d -p "$CACHE_DIR" remote.XXXXXX) || return 1
+  # shellcheck disable=SC2064
+  trap "rm -rf -- '$work'; trap - RETURN" RETURN
+
+  local now down
+  now=$(date +%s)
+  for id in "${ids[@]}"; do
+    down="$DOWN_DIR/$id"
+    if readable_file "$down" && (( now - $(stat -c %Y -- "$down" 2>/dev/null || echo 0) < MACHINE_RETRY_SECONDS )); then
+      continue
+    fi
+    ( on_machine "$id" api snapshot | head -c "$((SNAPSHOT_BYTE_CAP + 1))" > "$work/$id" ) &
+  done
+  wait
+
+  local snapshots='' snap
+  for id in "${ids[@]}"; do
+    [[ -f $work/$id ]] || continue
+    snap=$(cat -- "$work/$id")
+    if [[ -z $snap ]] || over_byte_cap "$snap" "$SNAPSHOT_BYTE_CAP" ||
+       ! printf '%s' "$snap" | jq -e '.result.snapshot' >/dev/null 2>&1; then
+      : > "$DOWN_DIR/$id"
+      continue
+    fi
+    rm -f -- "$DOWN_DIR/$id"
+    (( ${#snapshots} <= TOTAL_BYTE_CAP )) || break
+    snapshots+="${snapshots:+,}\"@$id\":$snap"
+  done
+
+  printf '%s' "$list" | jq -c 'map({key: (.id // "" | tostring), value: (.label // "" | tostring | .[0:80])}) | from_entries' 2>/dev/null || printf '{}\n'
+  printf '%s' "$snapshots"
+}
+
+# ---------------------------------------------------------------- windows
+
+parent_pid() {
+  local line rest
+  { read -r line < "/proc/$1/stat"; } 2>/dev/null || return 1
+  # The comm field is in brackets and can hold spaces, so cut after it.
+  rest=${line#*") "}
+  # shellcheck disable=SC2086
+  set -- $rest
+  [[ ${2-} =~ ^[0-9]+$ ]] || return 1
+  printf '%s' "$2"
+}
+
+# The Hyprland window showing a session, as "address<TAB>workspace": a local
+# one, or with a target the one on that saved machine. A window launched for
+# a session carries `herdr [--remote <target>] [--session <name>]` on its own
+# command line; one started by hand inside a terminal is found by walking up
+# from the herdr client process to the window that owns it.
+window_for() {
+  local want="$1" want_target="${2-}"
+  command -v hyprctl >/dev/null 2>&1 || return 1
+
+  local clients
+  clients=$(hyprctl clients -j 2>/dev/null | head -c "$((WINDOWS_BYTE_CAP + 1))") || true
+  [[ -n $clients ]] || return 1
+  over_byte_cap "$clients" "$WINDOWS_BYTE_CAP" && return 1
+
+  declare -A window_of_pid=()
+  local pid address workspace args
+  while IFS=$'\t' read -r pid address workspace; do
+    [[ -n $pid && -n $address ]] || continue
+    window_of_pid[$pid]=$address$'\t'$workspace
+  done < <(printf '%s' "$clients" |
+    jq -r '.[] | select(.pid > 0) | "\(.pid)\t\(.address)\t\(.workspace.name // "")"' 2>/dev/null)
+
+  # Which session a command line attaches to, as "target<TAB>name", if it
+  # is a herdr client at all. A client carries flags and nothing else; any
+  # bare word is a subcommand (`server`, `api snapshot`) and says nothing
+  # about a window. Two machines can both have a session called "default",
+  # so the --remote target is half of what a window shows.
+  session_of() {
+    local -a words
+    read -r -a words <<<"${1-}"
+    local i j name target
+    for ((i = 0; i < ${#words[@]}; i++)); do
+      [[ ${words[i]##*/} == herdr ]] || continue
+      name=default
+      target=""
+      for ((j = i + 1; j < ${#words[@]}; j++)); do
+        case ${words[j]} in
+          --session) name=${words[j + 1]-}; j=$((j + 1)) ;;
+          --remote) target=${words[j + 1]-}; j=$((j + 1)) ;;
+          -*) ;;
+          *) return 1 ;;
+        esac
+      done
+      printf '%s\t%s' "$target" "$name"
+      return 0
+    done
+    return 1
+  }
+
+  local ancestor hops
+  while read -r pid args; do
+    [[ $pid =~ ^[0-9]+$ ]] || continue
+    [[ $(session_of "$args") == "$want_target"$'\t'"$want" ]] || continue
+    ancestor=$pid
+    for ((hops = 0; hops < 12; hops++)); do
+      if [[ -n ${window_of_pid[$ancestor]-} ]]; then
+        printf '%s\n' "${window_of_pid[$ancestor]}"
+        return 0
+      fi
+      ancestor=$(parent_pid "$ancestor") || break
+      [[ -n $ancestor && $ancestor != 0 && $ancestor != 1 ]] || break
+    done
+  done < <(ps -eo pid=,args= 2>/dev/null | grep -E 'her[d]r')
+  return 1
+}
+
+show_session() {
+  local name="$1" target="${2-}" address="" workspace=""
+  IFS=$'\t' read -r address workspace < <(window_for "$name" "$target" || true) || true
+
+  # Both values are spliced into a Lua expression, so they are checked for
+  # shape rather than escaped.
+  if [[ $address =~ ^0x[0-9a-fA-F]+$ ]]; then
+    # Focus picks a window but does not bring its workspace into view, so
+    # switch first.
+    if [[ $workspace =~ ^(special:)?[A-Za-z0-9_-]{1,32}$ ]]; then
+      hyprctl dispatch "hl.dsp.focus({ workspace = '$workspace' })" >/dev/null 2>&1 || true
+    fi
+    hyprctl dispatch "hl.dsp.focus({ window = 'address:$address' })" >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  # No window yet: attach one. `herdr --session <name>` attaches to the
+  # running server under that name, and `--remote <target>` to the one on a
+  # saved machine, over ssh.
+  local -a herdr_cmd=(herdr)
+  [[ -z $target ]] || herdr_cmd+=(--remote "$target")
+  [[ $name == default ]] || herdr_cmd+=(--session "$name")
+  local -a launch=(setsid)
+  command -v uwsm-app >/dev/null 2>&1 && launch=(setsid uwsm-app --)
+  if command -v foot >/dev/null 2>&1; then
+    launch+=(foot "--app-id=$APP_ID" "--working-directory=$HOME" -e "${herdr_cmd[@]}")
+  elif command -v xdg-terminal-exec >/dev/null 2>&1; then
+    launch+=(xdg-terminal-exec "--app-id=$APP_ID" "--dir=$HOME" -- "${herdr_cmd[@]}")
+  else
+    return 1
+  fi
+  ( umask "$INHERITED_UMASK" && exec "${launch[@]}" ) >/dev/null 2>&1 &
+  disown
+}
+
+# The pane is focused inside the server first, so herdr has already switched
+# workspace and tab by the time the window comes up. That focus is also what
+# marks a finished agent as seen.
+#
+# On a saved machine the focus happens over there, and the window brought up
+# is the one attached to that machine, the way herdr opens one: a local
+# window only shows a machine you picked in it yourself.
+cmd_focus() {
+  local name="${1-}" pane="${2-}" machine="${3-}"
+  valid_session_name "$name" || die "not a session name"
+  valid_pane_id "$pane" || die "not a pane id"
+  [[ -z $machine ]] || valid_machine_id "$machine" || die "not a machine id"
+  require_tools
+
+  # No `--` before the pane id: herdr does not take one, and valid_pane_id has
+  # already refused anything that could look like an option.
+  local target=""
+  if [[ -n $machine ]]; then
+    IFS=$'\t' read -r target name < <(machine_profile "$machine") || die "no such machine"
+    on_machine "$machine" agent focus "$pane" >/dev/null || true
+  elif [[ $name == default ]]; then
+    herdr agent focus "$pane" >/dev/null 2>&1 || true
+  else
+    herdr --session "$name" agent focus "$pane" >/dev/null 2>&1 || true
+  fi
+  show_session "$name" "$target" || die "no terminal available"
+  printf '{"ok":true}\n'
+}
+
+case "${1:-list}" in
+  list) if demo_on; then demo_list; else cmd_list; fi ;;
+  focus) shift; if demo_on; then printf '{"ok":true}\n'; else cmd_focus "${1-}" "${2-}" "${3-}"; fi ;;
+  demo) shift; cmd_demo "${1-}" ;;
+  *) die "unknown command" ;;
+esac

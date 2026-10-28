@@ -2,11 +2,7 @@
 
 Every [herdr](https://herdr.dev) agent as a little cube on your screen, for [Omarchy](https://omarchy.org). Busy ones build or type, waiting ones flash red until you answer, finished ones show off until you look, and the idle ones sleep together in a pile in the corner.
 
-![A row of cubes along the bottom of the screen, each with its agent's name on a plate under it: one building a stack, two flashing red with an exclamation mark, two finished ones under sparkles, and a sleeping pile of five in the corner](assets/screenshot.png)
-
-![The bots at work: one finishes with confetti, a sleeper wakes up and joins the line, one starts waiting, a click answers it, one is picked up and put somewhere else, and after H they all drop off the screen and hop back a minute later](assets/demo.gif)
-
-The same clip as a video: [assets/demo.mp4](assets/demo.mp4).
+![Three cubes along the bottom of the screen: one finishes with confetti, one starts waiting and a click sends it back to work, one is picked up and put somewhere else, the finished one is clicked and goes to sleep in the corner, and after H they all drop off the screen and hop back a minute later](assets/demo.gif)
 
 ## What they do
 

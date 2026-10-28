@@ -7,7 +7,7 @@ import qs.Commons
 import qs.Commons as Commons
 import "Bots.js" as Bots
 
-// Herdr Bots: every agent herdr is running, as a little pet standing on the
+// Herdrgotchi: every agent herdr is running, as a little pet standing on the
 // bottom edge of the screen with its name on a plate under it, drawn as a
 // plain cube. They behave like Tamagotchis. A busy agent is at work: it
 // builds a stack or fills its sides with text. One that is waiting on you
@@ -30,7 +30,7 @@ import "Bots.js" as Bots
 // they were standing in front of.
 //
 // shell.json settings (top-level plugins[] entry):
-//   { "id": "jankeesvw.herdr-bots",
+//   { "id": "jankeesvw.herdrgotchi",
 //     "monitor": "DP-3",      // output name; default is the one focused at start
 //     "side": "right",        // "right" or "left" corner
 //     "marginX": 24, "marginY": 8,
@@ -43,7 +43,7 @@ Item {
   property var manifest: null
   property string omarchyPath: ""
 
-  readonly property string pluginId: "jankeesvw.herdr-bots"
+  readonly property string pluginId: "jankeesvw.herdrgotchi"
 
   // ------------------------------------------------------------- settings
 
@@ -189,7 +189,7 @@ Item {
   // ----------------------------------------------------------------- data
 
   readonly property string script: {
-    var raw = String(Qt.resolvedUrl("bin/herdr-bots"))
+    var raw = String(Qt.resolvedUrl("bin/herdrgotchi"))
     return raw.indexOf("file://") === 0 ? decodeURIComponent(raw.slice(7)) : ""
   }
 
@@ -443,7 +443,7 @@ Item {
   }
 
   IpcHandler {
-    target: "jankeesvw.herdr-bots"
+    target: "jankeesvw.herdrgotchi"
     function attend(): string {
       var p = root.neediest()
       if (!p) return "nobody needs you"
@@ -761,7 +761,7 @@ Item {
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
-    WlrLayershell.namespace: "jankeesvw-herdr-bots"
+    WlrLayershell.namespace: "jankeesvw-herdrgotchi"
     WlrLayershell.layer: WlrLayer.Top
     // Keys only while one of them is pointed at or the pile is open, so the
     // pets never take the keyboard from the window you are typing in. Held

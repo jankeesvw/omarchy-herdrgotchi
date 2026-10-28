@@ -1,5 +1,5 @@
 #!/bin/bash
-# herdr-bots: every agent inside the running herdr servers, as JSON for the
+# herdrgotchi: every agent inside the running herdr servers, as JSON for the
 # little pets on screen.
 #
 #   list                              every agent in every running local
@@ -28,7 +28,7 @@ readonly INHERITED_UMASK=$(umask)
 umask 077
 
 readonly APP_ID=org.omarchy.herdr
-readonly CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-herdr-bots"
+readonly CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy-herdrgotchi"
 readonly DEMO_FILE="$CACHE_DIR/demo"
 
 # What another process may hand this script before anything reads it. The

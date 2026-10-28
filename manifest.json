@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "id": "jankeesvw.herdr-bots",
-  "name": "Herdr Bots",
+  "id": "jankeesvw.herdrgotchi",
+  "name": "Herdrgotchi",
   "version": "0.1.0",
   "author": "Jankees van Woezik",
   "license": "MIT",
-  "description": "Every herdr agent as a little cube on your screen: busy ones build or type, waiting ones ask for you, finished ones show off until you look.",
+  "description": "A Tamagotchi for every herdr agent, as a little cube on your screen: busy ones build or type, waiting ones ask for you, finished ones show off until you look.",
   "kinds": [
     "service"
   ],

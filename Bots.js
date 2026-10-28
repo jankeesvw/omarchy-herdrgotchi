@@ -1,6 +1,6 @@
 .pragma library
 
-// Herdr Bots, drawn as vectors: a plain shaded cube that says everything
+// Herdrgotchi's pets, drawn as vectors: a plain shaded cube that says everything
 // with how it moves. Smooth shapes rather than pixels, so a pet the size of a
 // bar icon still reads.
 //

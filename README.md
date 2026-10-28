@@ -9,8 +9,8 @@ Every [herdr](https://herdr.dev) agent as a little cube on your screen, for [Oma
 Each pet follows one agent, with the agent's name on a plate under it. They behave like Tamagotchis, and each one keeps its own rhythm.
 
 - **Working**: the cube builds a stack of blocks next to it, or fills its sides with text. Now and then it takes a breather and looks up at you.
-- **Waiting on you** (herdr's `blocked`: an approval or a question on screen): it rocks and flashes red under an exclamation mark, and it gets more insistent the longer you leave it. Its plate gets a red edge.
-- **Finished**: it cheers and hops under sparkles, with a gold edge on its plate. It keeps asking for attention for at least ten minutes, even after herdr counts it as seen, because a glance at the tab is not the same as looking after it. Leave it long enough and it gets bored, and shows it.
+- **Waiting on you** (herdr's `blocked`: an approval or a question on screen): it rocks and flashes red under an exclamation mark, and it gets more insistent the longer you leave it.
+- **Finished**: it cheers and hops under sparkles. It keeps asking for attention for at least ten minutes, even after herdr counts it as seen, because a glance at the tab is not the same as looking after it. Leave it long enough and it gets bored, and shows it.
 - **Idle**: it goes to sleep in the pile in the corner, which shows how many are asleep.
 
 The changes are the moments worth seeing, so every change of state has an animation of its own: confetti when work finishes, a startled jump when an agent starts waiting on you, a stretch when one wakes up, and a heart and a yawn when you have looked after it and it goes back to sleep.
@@ -27,7 +27,7 @@ The pets only take the keyboard while you point at one or have the list open, so
 
 ## Saved SSH machines
 
-Agents on the saved SSH machines in `herdr machine list` are part of the herd too, with a green **SSH** tag in front of their name. Clicking one focuses its pane on that machine and brings up the window attached to it, the way herdr opens one: `herdr --remote <target>`, in a new `foot` window when there is none yet. A machine that does not answer within a few seconds is left out, and asked again a minute later.
+Agents on the saved SSH machines in `herdr machine list` are part of the herd too. Clicking one focuses its pane on that machine and brings up the window attached to it, the way herdr opens one: `herdr --remote <target>`, in a new `foot` window when there is none yet. A machine that does not answer within a few seconds is left out, and asked again a minute later.
 
 ## Settings
 
@@ -41,7 +41,6 @@ The pets have no bar widget. They are set in their own entry in the top-level `p
   "marginX": 24,
   "marginY": 8,
   "scale": 1.0,           // 1.0 makes the body 26 logical pixels square
-  "look": "cube",         // "cube", or "robot" for little robots with faces
   "sleepers": true        // the pile of idle agents in the corner
 }
 ```

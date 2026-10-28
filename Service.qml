@@ -9,21 +9,17 @@ import "Bots.js" as Bots
 
 // Herdr Bots: every agent herdr is running, as a little pet standing on the
 // bottom edge of the screen with its name on a plate under it, drawn as a
-// plain cube or, if you would rather, a robot. They behave like Tamagotchis.
-// A busy agent is at work: the cube builds a stack or fills its sides with
-// text, the robot hammers on a stone or types at a little terminal. One that
-// is waiting on you rocks and flashes red, or sits in a chair in the waiting
-// room, and gets worse the longer you leave it. One that finished shows off
-// for at least ten minutes, and if you never look, gets bored. The ones with
-// nothing to do sleep together in a pile in the corner; a click on it lists
-// them all.
+// plain cube. They behave like Tamagotchis. A busy agent is at work: it
+// builds a stack or fills its sides with text. One that is waiting on you
+// rocks and flashes red, and gets worse the longer you leave it. One that
+// finished shows off for at least ten minutes, and if you never look, gets
+// bored. The ones with nothing to do sleep together in a pile in the corner;
+// a click on it lists them all.
 //
 // The moments worth seeing are the changes, so every change of state gets an
 // animation of its own: confetti when work finishes, a startled "?!" when an
 // agent starts waiting on you, a stretch when one wakes up, and a heart and a
 // yawn when you have looked after it and it goes back to sleep.
-//
-// An agent on a saved SSH machine has a green "SSH" tag in front of its name.
 //
 // Hover a pet for its name, click it to land on its pane. Pick one up and it
 // hangs from a climbing hold until you put it down somewhere else; it stays
@@ -39,7 +35,6 @@ import "Bots.js" as Bots
 //     "side": "right",        // "right" or "left" corner
 //     "marginX": 24, "marginY": 8,
 //     "scale": 1.0,           // 1.0 makes the body 26 logical pixels square
-//     "look": "cube",         // "cube" or "robot"
 //     "sleepers": true }      // the pile of idle agents in the corner
 Item {
   id: root
@@ -95,7 +90,6 @@ Item {
   }
   readonly property bool leftSide: String(root.entry.side || "right") === "left"
   readonly property bool showSleepers: root.entry.sleepers !== false
-  readonly property string petLook: String(root.entry.look || "") === "robot" ? "robot" : "cube"
   readonly property string monitorSetting: {
     var value = String(root.entry.monitor || "")
     return /^[A-Za-z0-9._-]{1,64}$/.test(value) ? value : ""
@@ -512,14 +506,14 @@ Item {
     if (p < length) { s.pose = "hop"; s.lift = p / length }
   }
 
-  // What a pet is doing right now, for Bots.js to draw in either look.
+  // What a pet is doing right now, for Bots.js to draw.
   function petState(p) {
     var now = root.clock
     var a = root.age(p.since)
     var s = {
       kind: p.kind, accent: String(Commons.Color.accent),
-      t: p.own, tempo: 1, blink: p.blinking, look: 0, pose: "stand", arms: "down",
-      emote: "", face: "working", tears: false, shake: false, mess: false, tool: "", burst: 0, lift: 0
+      t: p.own, look: 0, pose: "stand", arms: "down",
+      emote: "", face: "working", tears: false, shake: false, tool: "", burst: 0, lift: 0
     }
 
     if (p.held) { s.pose = "hang"; s.face = "whee"; return s }
@@ -547,7 +541,7 @@ Item {
         else root.hopEvery(s, t - 0.85, 0.45, 0.35)
         return s
       case "asked":
-        // Startled out of its work, then off to the waiting room.
+        // Startled out of its work, then it starts rocking.
         s.face = "worried"; s.emote = "alarm"
         if (t < 0.6) { s.pose = "leap"; s.lift = t / 0.6; s.arms = "up" }
         else { s.pose = "chair"; s.shake = t < 1.2 }
@@ -555,7 +549,7 @@ Item {
       case "woke":
         // Eyes open, a stretch, a hop, and to work.
         if (t < 0.5) { s.pose = "sit"; s.face = "sleep"; s.emote = "snooze" }
-        else if (t < 1.1) { s.pose = "sit"; s.face = "working"; s.arms = "up"; s.blink = t < 0.6 }
+        else if (t < 1.1) { s.pose = "sit"; s.face = "working"; s.arms = "up" }
         else { s.pose = "hop"; s.lift = (t - 1.1) / 0.5; s.face = "happy" }
         return s
       case "answered":
@@ -583,8 +577,8 @@ Item {
       s.look = p.resting ? 0 : 1            // a breather: it looks up at you
       break
     case "blocked":
-      // The waiting room: a chair, swinging legs, a wave now and then. After
-      // a minute it starts crying, after five it cannot sit still.
+      // Waiting for you: it rocks, and jumps now and then. After a minute
+      // it flashes faster, after five it cannot sit still.
       s.pose = "chair"
       s.face = "worried"
       s.emote = a >= 300 ? "bangbang" : "bang"
@@ -598,7 +592,7 @@ Item {
         s.face = "happy"; s.arms = "cheer"; s.emote = "sparkle"
         root.hopEvery(s, p.own, 2.2, 0.4)
       } else {
-        s.face = "bored"; s.pose = "sit"; s.mess = true
+        s.face = "bored"; s.pose = "sit"
       }
       break
     default:
@@ -628,26 +622,6 @@ Item {
     return most
   }
   readonly property int petH: root.spriteH + root.plateRoom + Math.round(2 * root.k)
-
-  // The green tag in front of the name of an agent on a saved SSH machine,
-  // sized to the text it stands next to.
-  component SshTag: Rectangle {
-    property real size: 9
-    width: Math.ceil(tagText.implicitWidth + size * 0.6)
-    height: Math.round(size * 1.15)
-    radius: Math.round(size * 0.25)
-    color: Bots.GREEN
-
-    Text {
-      id: tagText
-      anchors.centerIn: parent
-      text: "SSH"
-      color: Bots.OUTLINE
-      font.family: Style.font.family
-      font.pixelSize: Math.round(parent.size * 0.72)
-      font.weight: Font.Bold
-    }
-  }
 
   function notePlate(key, height) {
     var next = ({})
@@ -910,7 +884,7 @@ Item {
             width: root.spriteW
             height: root.spriteH
             renderStrategy: Canvas.Cooperative
-            onPaint: Bots.draw(root.petLook, getContext("2d"), width, height, {
+            onPaint: Bots.draw(getContext("2d"), width, height, {
               kind: pile.kind, accent: String(Commons.Color.accent),
               t: root.clock / 1000 * 0.8, face: "sleep", pose: "sit", emote: "snooze"
             })
@@ -977,8 +951,6 @@ Item {
           property double lastTick: Date.now()
           property bool resting: false
           property double restUntil: 0
-          property double blinkAt: Date.now() + 1500 + Math.random() * 4000
-          readonly property bool blinking: root.clock >= blinkAt && root.clock < blinkAt + 140
 
           width: (spot || held) ? 0 : root.spriteW
           height: root.petH
@@ -1010,7 +982,6 @@ Item {
               pet.resting = false
             }
             if (!pet.resting) pet.own += dt * pet.tempo
-            if (now > pet.blinkAt + 140) pet.blinkAt = now + 2500 + Math.random() * 5000
             if (pet.leaving && !pet.held && !pet.spot && (now - pet.transitionAt) / 1000 >= root.transitionSeconds.seen) {
               var key = pet.key
               Qt.callLater(function() { root.retire(key) })
@@ -1045,18 +1016,13 @@ Item {
               width: root.spriteW
               height: root.spriteH
               renderStrategy: Canvas.Cooperative
-              onPaint: Bots.draw(root.petLook, getContext("2d"), width, height, root.petState(pet))
+              onPaint: Bots.draw(getContext("2d"), width, height, root.petState(pet))
             }
 
             // Its name on a plate under its feet, so you can tell them
-            // apart without hovering. The edge says who is waiting on you.
+            // apart without hovering.
             Rectangle {
               id: plate
-              // Room on the first line for the SSH tag, which sits in front
-              // of the name and wraps with it. Set while the name is laid out.
-              readonly property int lead: pet.machine !== "" ? sshTag.width + Math.round(3 * root.k) : 0
-              property real tagX: 0
-              property real tagY: 0
               visible: !pet.held
               y: root.spriteH + Math.round(1 * root.k)
               height: Math.max(root.plateH, Math.ceil(plateLabel.implicitHeight) + Math.round(3 * root.k))
@@ -1064,14 +1030,12 @@ Item {
               Component.onCompleted: root.notePlate(pet.key, height)
               // Centred under the pet, however wide: pets stand a box apart,
               // so plates never meet. Only the edge of the screen moves it.
-              width: Math.min(plate.lead + Math.ceil(plateMetrics.advanceWidth) + Math.round(8 * root.k), root.spriteW - Math.round(4 * root.k))
+              width: Math.min(Math.ceil(plateMetrics.advanceWidth) + Math.round(8 * root.k), root.spriteW - Math.round(4 * root.k))
               x: Math.max(-body.x, Math.min(win.width - body.x - width, Math.round(root.holdX - width / 2)))
               radius: Math.round(3 * root.k)
               color: Qt.rgba(0.043, 0.043, 0.063, 0.86)
               border.width: 1
-              border.color: pet.status === "blocked" ? Bots.RED
-                          : pet.status === "done" ? Bots.GOLD
-                          : Qt.rgba(1, 1, 1, 0.16)
+              border.color: Qt.rgba(1, 1, 1, 0.16)
 
               TextMetrics {
                 id: plateMetrics
@@ -1092,24 +1056,6 @@ Item {
                 font.family: Style.font.family
                 font.pixelSize: Math.round(9 * root.k)
                 font.weight: Font.Medium
-
-                // The first line gives up room for the tag, and the two are
-                // centred together.
-                onLineLaidOut: function(line) {
-                  if (line.number !== 0 || plate.lead === 0) return
-                  line.width = width - plate.lead
-                  line.x = plate.lead
-                  plate.tagX = (width - plate.lead - line.implicitWidth) / 2
-                  plate.tagY = line.y + line.height / 2
-                }
-              }
-
-              SshTag {
-                id: sshTag
-                visible: pet.machine !== ""
-                size: 9 * root.k
-                x: Math.round(plateLabel.x + plate.tagX)
-                y: Math.round(plateLabel.y + plate.tagY - height / 2)
               }
             }
 
@@ -1172,7 +1118,7 @@ Item {
         renderStrategy: Canvas.Cooperative
         onPaint: {
           if (root.carry === null) return
-          Bots.draw(root.petLook, getContext("2d"), width, height, {
+          Bots.draw(getContext("2d"), width, height, {
             kind: root.carry.kind, accent: String(Commons.Color.accent),
             t: root.clock / 1000, pose: "hang", face: "whee"
           })
@@ -1263,11 +1209,11 @@ Item {
             height: Math.ceil(40 * row.s)
             clip: true
             Canvas {
-              x: -Bots.sleepCrop(root.petLook).x * row.s
-              y: -Bots.sleepCrop(root.petLook).y * row.s
+              x: -Bots.SLEEP_CROP.x * row.s
+              y: -Bots.SLEEP_CROP.y * row.s
               width: Math.ceil(Bots.W * row.s)
               height: Math.ceil(Bots.H * row.s)
-              onPaint: Bots.draw(root.petLook, getContext("2d"), width, height, {
+              onPaint: Bots.draw(getContext("2d"), width, height, {
                 kind: row.modelData.kind, accent: String(Commons.Color.accent),
                 t: 0, face: "sleep", pose: "sit"
               })
@@ -1282,28 +1228,15 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(1)
 
-            Item {
+            Text {
               width: parent.width
-              height: rowName.implicitHeight
-
-              SshTag {
-                id: rowTag
-                visible: row.modelData.machine !== ""
-                size: Style.font.body
-                anchors.verticalCenter: parent.verticalCenter
-              }
-              Text {
-                id: rowName
-                x: rowTag.visible ? rowTag.width + Style.space(5) : 0
-                width: parent.width - x
-                text: row.modelData.name
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                color: Commons.Color.popups.text
-                font.family: Style.font.family
-                font.pixelSize: Style.font.body
-                font.bold: true
-              }
+              text: row.modelData.name
+              textFormat: Text.PlainText
+              elide: Text.ElideRight
+              color: Commons.Color.popups.text
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              font.bold: true
             }
             Text {
               width: parent.width
